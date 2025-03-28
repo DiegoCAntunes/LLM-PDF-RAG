@@ -1,5 +1,5 @@
-from pydantic_settings import BaseSettings  # Changed import
-from pydantic import Field  # Optional: for field configuration
+from pydantic_settings import BaseSettings
+from pydantic import Field 
 
 class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
@@ -10,10 +10,10 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 100
     CACHE_THRESHOLD: float = 80.0
     BATCH_SIZE: int = 100
-    HYBRID_SEARCH_ALPHA: float = Field(default=0.7, ge=0, le=1)  # Example with validation
+    HYBRID_SEARCH_ALPHA: float = Field(default=0.7, ge=0, le=1)
     
     class Config:
         env_file = ".env"
-        env_file_encoding = "utf-8"  # Recommended addition
+        env_file_encoding = "utf-8" 
 
 settings = Settings()

@@ -56,7 +56,7 @@ pip install -r requirements.txt
 
 ### 3. Download Required Models
 ```bash
-ollama pull llama3:8b
+ollama pull llama3.2:3b
 ollama pull nomic-embed-text
 ```
 

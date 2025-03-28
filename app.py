@@ -90,7 +90,7 @@ def get_redis_store() -> RedisVectorStore:
                 distance_metric="COSINE",
                 metadata_schema=[
                     {"name": "answer", "type": "text"},
-                    {"name": "source", "type": "text"},  # Added source tracking
+                    {"name": "source", "type": "text"},
                 ],
             ),
         )
