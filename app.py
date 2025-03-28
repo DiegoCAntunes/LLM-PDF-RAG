@@ -1,5 +1,8 @@
+import csv
 import os
+import sys
 import tempfile
+from io import StringIO
 
 import chromadb
 import ollama
@@ -9,6 +12,8 @@ from chromadb.utils.embedding_functions.ollama_embedding_function import (
 )
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_core.documents import Document
+from langchain_ollama import OllamaEmbeddings
+from langchain_redis import RedisConfig, RedisVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
 from streamlit.runtime.uploaded_file_manager import UploadedFile
@@ -35,6 +40,93 @@ Format your response as follows:
 
 Important: Base your entire response solely on the information provided in the context. Do not include any external knowledge or assumptions not present in the given text.
 """
+
+
+def get_redis_store() -> RedisVectorStore:
+    """Gets or creates a Redis vector store for caching embeddings.
+
+    Creates an Ollama embeddings object using the nomic-embed-text model and initializes
+    a Redis vector store with cosine similarity metric for storing cached question-answer pairs.
+
+    Returns:
+        RedisVectorStore: A Redis vector store configured with Ollama embeddings and
+            metadata schema for storing answers.
+
+    Raises:
+        RedisConnectionError: If unable to connect to Redis.
+    """
+    embeddings = OllamaEmbeddings(
+        model="nomic-embed-text:latest",
+    )
+    return RedisVectorStore(
+        embeddings,
+        config=RedisConfig(
+            index_name="cached_contents",
+            redis_url="redis://localhost:6379",
+            distance_metric="COSINE",
+            metadata_schema=[
+                {"name": "answer", "type": "text"},
+            ],
+        ),
+    )
+
+
+def create_cached_contents(uploaded_file: UploadedFile) -> list[Document]:
+    """Creates cached question-answer pairs from an uploaded CSV file.
+
+    Takes an uploaded CSV file containing question-answer pairs, converts them to Document
+    objects and adds them to a Redis vector store for caching.
+
+    Args:
+        uploaded_file: A Streamlit UploadedFile object containing the CSV data with
+            'question' and 'answer' columns.
+
+    Returns:
+        list[Document]: List of Document objects created from the CSV rows.
+
+    Raises:
+        ValueError: If CSV is missing required 'question' or 'answer' columns.
+        RedisConnectionError: If unable to add documents to Redis vector store.
+    """
+    data = uploaded_file.getvalue().decode("utf-8")
+    csv_reader = csv.DictReader(StringIO(data))
+
+    docs = []
+    for row in csv_reader:
+        docs.append(
+            Document(page_content=row["question"], metadata={"answer": row["answer"]})
+        )
+    vector_store = get_redis_store()
+    vector_store.add_documents(docs)
+    st.success("Cache contents added!")
+
+
+def query_semantic_cache(query: str, n_results: int = 1, threshold: float = 80.0):
+    """Queries the semantic cache for similar questions and returns cached results if found.
+
+    Args:
+        query: The search query text to find relevant cached results.
+        n_results: Maximum number of results to return. Defaults to 1.
+        threshold: Minimum similarity score threshold (0-100) for returning cached results.
+            Defaults to 80.0.
+
+    Returns:
+        list: List of tuples containing matched Documents and their similarity scores if
+            matches above threshold are found. None if no matches above threshold.
+
+    Raises:
+        RedisConnectionError: If there are issues connecting to Redis.
+    """
+    vector_store = get_redis_store()
+    results = vector_store.similarity_search_with_score(query, k=n_results)
+
+    if not results:
+        return None
+
+    match_percentage = (1 - abs(results[0][1])) * 100
+    if match_percentage >= threshold:
+        return results
+    return None
 
 
 def process_document(uploaded_file: UploadedFile) -> list[Document]:
@@ -215,8 +307,24 @@ if __name__ == "__main__":
     with st.sidebar:
         st.set_page_config(page_title="RAG Question Answer")
         uploaded_file = st.file_uploader(
-            "**📑 Upload PDF files for QnA**", type=["pdf"], accept_multiple_files=False
+            "**📑 Upload PDF files for QnA**",
+            type=["pdf", "csv"],
+            accept_multiple_files=False,
+            help="Upload csv for cached results only",
         )
+        upload_option = st.radio(
+            "Upload options:",
+            options=["Primary", "Cache"],
+            help="Choose Primary for uploading document for QnA.\n\nChoose Cache for uploading cached results",
+        )
+
+        if (
+            uploaded_file
+            and upload_option == "Primary"
+            and uploaded_file.name.split(".")[-1] == "csv"
+        ):
+            st.error("CSV is only allowed for 'Cache' option.")
+            sys.exit(1)
 
         process = st.button(
             "⚡️ Process",
@@ -225,8 +333,12 @@ if __name__ == "__main__":
             normalize_uploaded_file_name = uploaded_file.name.translate(
                 str.maketrans({"-": "_", ".": "_", " ": "_"})
             )
-            all_splits = process_document(uploaded_file)
-            add_to_vector_collection(all_splits, normalize_uploaded_file_name)
+
+            if upload_option == "Cache":
+                all_splits = create_cached_contents(uploaded_file)
+            else:
+                all_splits = process_document(uploaded_file)
+                add_to_vector_collection(all_splits, normalize_uploaded_file_name)
 
     # Question and Answer Area
     st.header("🗣️ RAG Question Answer")
@@ -236,15 +348,25 @@ if __name__ == "__main__":
     )
 
     if ask and prompt:
-        results = query_collection(prompt)
-        context = results.get("documents")[0]
-        relevant_text, relevant_text_ids = re_rank_cross_encoders(context)
-        response = call_llm(context=relevant_text, prompt=prompt)
-        st.write_stream(response)
+        cached_results = query_semantic_cache(query=prompt)
 
-        with st.expander("See retrieved documents"):
-            st.write(results)
+        if cached_results:
+            st.write(cached_results[0][0].metadata["answer"].replace("\\n", "\n"))
+        else:
+            results = query_collection(prompt=prompt)
 
-        with st.expander("See most relevant document ids"):
-            st.write(relevant_text_ids)
-            st.write(relevant_text)
+            context = results.get("documents")[0]
+            if not context:
+                st.write("No results found.")
+                sys.exit(1)
+
+            relevant_text, relevant_text_ids = re_rank_cross_encoders(context)
+            response = call_llm(context=relevant_text, prompt=prompt)
+            st.write_stream(response)
+
+            with st.expander("See retrieved documents"):
+                st.write(results)
+
+            with st.expander("See most relevant document ids"):
+                st.write(relevant_text_ids)
+                st.write(relevant_text)
