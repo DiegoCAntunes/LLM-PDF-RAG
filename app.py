@@ -8,7 +8,6 @@ import asyncio
 import csv
 import logging
 import os
-import sys
 import tempfile
 from functools import lru_cache
 from io import StringIO
