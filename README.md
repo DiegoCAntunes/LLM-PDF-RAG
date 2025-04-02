@@ -20,8 +20,8 @@ A powerful local RAG (Retrieval-Augmented Generation) system that combines seman
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/llm-rag.git
-cd llm-rag
+git clone https://github.com/DiegoCAntunes/LLM-PDF-RAG.git
+cd LLM-PDF-RAG
 
 # Set up environment
 make setup
@@ -51,7 +51,7 @@ python -m venv .venv
 source .venv/bin/activate  # Linux/Mac
 # or .venv\Scripts\activate  # Windows
 
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt && pip install -r requirements/requirements-dev.txt
 ```
 
 ### 3. Download Required Models
@@ -63,6 +63,11 @@ ollama pull nomic-embed-text
 ## 🖥️ Usage Guide
 
 ### Launch the application:
+You can have Redis running on a docker container
+```bash
+docker run -d -p 6379:6379 redis/redis-stack:latest
+```
+
 ```bash
 make run
 ```
@@ -73,7 +78,7 @@ make run
 
 ### Ask Questions:
 - Type your question in the main text area
-- Choose search type (Hybrid recommended)
+- Choose search type (Semantic recommended, hybrid does not work great)
 - Click "Search" to get answers with citations
 
 ## ⚙️ Configuration
@@ -83,8 +88,8 @@ Edit `config.py` to customize:
 class Settings(BaseSettings):
     LLM_MODEL: str = "llama3.2:3b"
     HYBRID_SEARCH_ALPHA: float = 0.7  # 70% semantic, 30% keyword
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 200
+    CHUNK_SIZE: int = 500
+    CHUNK_OVERLAP: int = 100
 ```
 
 ## 🧠 Supported Models
