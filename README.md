@@ -81,7 +81,7 @@ Edit `config.py` to customize:
 
 ```python
 class Settings(BaseSettings):
-    LLM_MODEL: str = "llama3:8b"
+    LLM_MODEL: str = "llama3.2:3b"
     HYBRID_SEARCH_ALPHA: float = 0.7  # 70% semantic, 30% keyword
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
